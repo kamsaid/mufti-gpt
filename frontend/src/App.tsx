@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Message, ChatResponse } from "./types";
 import { ChatBubble } from "./components/ChatBubble";
 import { MessageInput } from "./components/MessageInput";
-import { Sidebar } from "./components/Sidebar";
+import { IntroHero } from "./components/IntroHero";
 
 export const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -63,21 +63,35 @@ export const App: React.FC = () => {
     }
   };
 
+  const showIntro = messages.length === 0;
+
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      <Sidebar />
-      <div className="flex flex-col flex-1">
-        <header className="p-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-sm">
-          <h1 className="text-xl font-semibold">Yaseen Chat</h1>
-        </header>
-        <main className="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
-          {messages.map((m, idx) => (
-            <ChatBubble key={idx} message={m} />
-          ))}
-          <div ref={bottomRef} />
-        </main>
-        <MessageInput onSend={sendMessage} loading={loading} />
-      </div>
+    <div className="h-screen flex flex-col bg-neutral-950 text-gray-100">
+      {/* Intro hero appears only before any message is sent */}
+      {showIntro ? (
+        <div className="flex flex-1 flex-col items-center justify-center p-4 text-center gap-8">
+          <IntroHero />
+          {/* MessageInput embedded in hero */}
+          <MessageInput
+            onSend={sendMessage}
+            loading={loading}
+            variant="hero"
+          />
+        </div>
+      ) : (
+        <>
+          <main className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+            {messages.map((m, idx) => (
+              <ChatBubble key={idx} message={m} />
+            ))}
+            <div ref={bottomRef} />
+          </main>
+          {/* Fixed bottom input for continuing chat */}
+          <div className="sticky bottom-0 w-full bg-neutral-900/80 backdrop-blur-md">
+            <MessageInput onSend={sendMessage} loading={loading} />
+          </div>
+        </>
+      )}
     </div>
   );
 };
