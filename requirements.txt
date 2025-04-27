@@ -1,0 +1,10 @@
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+langchain==0.1.15
+openai==1.6.1
+pinecone-client==3.1.0
+pydantic==2.6.4
+pydantic-settings==2.1.0
+pytest==8.1.1
+httpx==0.24.1
+tiktoken==0.6.0
