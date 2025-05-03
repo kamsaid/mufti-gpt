@@ -25,8 +25,8 @@ ROOT_DIR = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from pinecone import Pinecone, ServerlessSpec  # type: ignore
-from langchain.embeddings.openai import OpenAIEmbeddings
+from pinecone import Pinecone  # type: ignore
+from langchain_openai import OpenAIEmbeddings
 
 from backend.config import get_settings
 
@@ -149,45 +149,167 @@ def _load_hadith(sample: bool) -> Iterable[tuple[str, str]]:
     logger.info(f"Finished loading Hadith. Yielded {count} items.")
 
 
-def upsert_documents(pairs: Iterable[tuple[str, str]], embed) -> None:
-    """Batch embed and upsert to Pinecone."""
+def upsert_documents(pairs: Iterable[tuple[str, str]], embed, batch_size: int = 100) -> None:
+    """Embed *pairs* in batches and upsert to Pinecone.
 
-    # Convert iterable to list to check length and prevent exhaustion
-    pairs_list = list(pairs)
+    A single `embed.embed_documents()` call handles a list of texts, which is
+    **far** more efficient than one-by-one `embed_query` calls (fewer network
+    round-trips, better rate-limit utilisation).
+    """
+
+    pairs_list = [p for p in pairs if p[1] and not p[1].isspace()]
     logger.info(f"Starting upsert for {len(pairs_list)} pairs...")
 
     if not pairs_list:
         logger.warning("Received empty list of pairs, nothing to upsert.")
         return
 
-    vectors: List[tuple[str, list[float], dict]] = []
-    upserted_count = 0
+    upserted_total = 0
 
-    for doc_id, text in pairs_list: # Iterate over the list
-        emb = embed.embed_query(text)
-        vectors.append((doc_id, emb, {"text": text}))
+    for start in range(0, len(pairs_list), batch_size):
+        batch = pairs_list[start : start + batch_size]
+        ids = [doc_id for doc_id, _ in batch]
+        texts = [text for _, text in batch]
 
-        # upsert in batches of 100 to keep memory low
-        if len(vectors) >= 100:
-            logger.info(f"Upserting batch of {len(vectors)} vectors...")
-            try:
-                upsert_response = index.upsert(vectors=vectors)
-                logger.info(f"Pinecone upsert response (batch): {upsert_response}")
-                upserted_count += upsert_response.upserted_count
-            except Exception as e:
-                logger.error(f"Error during Pinecone batch upsert: {e}")
-            vectors.clear()
-
-    if vectors:
-        logger.info(f"Upserting final batch of {len(vectors)} vectors...")
         try:
-            upsert_response = index.upsert(vectors=vectors)
-            logger.info(f"Pinecone upsert response (final): {upsert_response}")
-            upserted_count += upsert_response.upserted_count
+            embeddings = embed.embed_documents(texts)  # one API call per batch
         except Exception as e:
-            logger.error(f"Error during Pinecone final upsert: {e}")
+            logger.error(f"Embedding batch starting at {start} failed: {e}")
+            continue
 
-    logger.info(f"Finished upsert loop. Total vectors reported upserted by Pinecone: {upserted_count}")
+        vectors = [
+            (ids[i], embeddings[i], {"text": texts[i]}) for i in range(len(ids))
+        ]
+
+        try:
+            upsert_resp = index.upsert(vectors=vectors)
+            upserted_total += getattr(upsert_resp, "upserted_count", 0) or 0
+            logger.info(
+                f"Upserted batch {start // batch_size + 1} – {len(vectors)} vectors"
+            )
+        except Exception as e:
+            logger.error(f"Pinecone upsert failed for batch {start}: {e}")
+
+    logger.info(
+        f"Finished upsert loop. Total vectors reported upserted by Pinecone: {upserted_total}"
+    )
+
+
+# Helper function to recursively extract text from JSON values
+def _flatten_json_value(value) -> List[str]:
+    """Recursively extracts non-empty string representations from JSON values."""
+    parts = []
+    if isinstance(value, str):
+        cleaned_value = value.strip()
+        if cleaned_value: # Add only non-empty strings
+            parts.append(cleaned_value)
+    elif isinstance(value, (int, float, bool)):
+        # Convert numbers and booleans to string
+        parts.append(str(value))
+    elif isinstance(value, list):
+        # Recursively flatten list items
+        for item in value:
+            parts.extend(_flatten_json_value(item))
+    elif isinstance(value, dict):
+        # Recursively flatten dictionary values
+        for v in value.values():
+            parts.extend(_flatten_json_value(v))
+    # Implicitly handles None and other types by returning empty list for them
+    return parts
+
+
+def _load_generic_json(file_name: str, prefix: str) -> Iterable[tuple[str, str]]:
+    """Yield `(id, text)` pairs from generic JSON structures using recursive flattening.
+
+    Handles:
+    1. Root dictionary: Creates one document per key, flattening its value.
+    2. Root list: Creates one document per item, flattening the item.
+    """
+
+    file_path = DATA_DIR / file_name
+    logger.info(f"Attempting to load generic JSON from: {file_path}")
+
+    try:
+        with file_path.open("r", encoding="utf-8") as fp:
+            data = json.load(fp)
+    except (json.JSONDecodeError, FileNotFoundError) as e:
+        logger.error(f"Failed to read {file_path}: {e}")
+        return
+
+    count = 0
+    if isinstance(data, dict):
+        # Process root dictionary: one document per key-value pair
+        for i, (k, v) in enumerate(data.items(), start=1):
+            # Flatten the value (v) recursively
+            flattened_parts = _flatten_json_value(v)
+            # Combine the key and the flattened value parts
+            text = f"{k}\n" + "\n".join(flattened_parts) if flattened_parts else k
+            # Only yield if there's meaningful text
+            if text.strip():
+                doc_id = f"{prefix}-{k}-{i}" # Include key in ID for potential uniqueness
+                yield doc_id, text.strip()
+                count += 1
+            else:
+                logger.warning(f"Skipping empty flattened content for key '{k}' in {file_name}")
+
+    elif isinstance(data, list):
+        # Process root list: one document per item
+        for i, item in enumerate(data, start=1):
+            # Flatten the item recursively
+            flattened_parts = _flatten_json_value(item)
+            # Join the flattened parts to form the document text
+            text = "\n".join(flattened_parts)
+            # Only yield if there's meaningful text
+            if text.strip():
+                doc_id = f"{prefix}-{i}"
+                yield doc_id, text.strip()
+                count += 1
+            else:
+                logger.warning(f"Skipping empty flattened content for list item {i} in {file_name}")
+
+    else:
+        logger.error(f"Unsupported JSON root type in {file_name}: {type(data)}. Expected dict or list.")
+        return
+
+    logger.info(f"Finished loading {file_name}. Yielded {count} items.")
+
+
+# ------------------------------------------------------------------
+# Wrapper loaders for newly added files
+# ------------------------------------------------------------------
+
+def _load_islamic_facts() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("islamic-facts.json", "fact")
+
+def _load_islamic_terms() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("islamic-terms.json", "term")
+
+def _load_islamic_laws() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("islamic-laws.json", "law")
+
+def _load_islamic_timeline() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("islamic-timeline.json", "timeline")
+
+def _load_prophet_muhammad() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("prophetmuhammad.json", "seerah")
+
+def _load_prophet_stories() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("prophetstories.json", "story")
+
+def _load_allah_names() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("Allahnames.json", "asmau")
+
+def _load_qibla() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("qibla.json", "qibla")
+
+def _load_quran_stats() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("quranstats.json", "qstats")
+
+def _load_road_to_salvation() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("roadtosalvation.json", "salvation")
+
+def _load_wudu() -> Iterable[tuple[str, str]]:
+    return _load_generic_json("wudu.json", "wudu")
 
 
 if __name__ == "__main__":
@@ -206,11 +328,11 @@ if __name__ == "__main__":
             name=settings.PINECONE_INDEX_NAME,
             dimension=1536,
             metric="cosine",
-            spec=ServerlessSpec(cloud="aws", region="us-east-1"),
         )
 
     index = pc.Index(settings.PINECONE_INDEX_NAME)
-    embed = OpenAIEmbeddings()
+    # Initialise embeddings with explicit key to avoid env-var lookup issues
+    embed = OpenAIEmbeddings(openai_api_key=settings.OPENAI_API_KEY)
 
     # Qur'an
     quran_pairs = list(_load_quran(args.sample)) # Materialize generator
@@ -218,5 +340,27 @@ if __name__ == "__main__":
     # Ahadith
     hadith_pairs = list(_load_hadith(args.sample)) # Materialize generator
     upsert_documents(hadith_pairs, embed)
+
+    # ------------------------------------------------------------------
+    # Newly added datasets (generic JSON ingestion)
+    # ------------------------------------------------------------------
+
+    generic_loaders = [
+        _load_islamic_facts,
+        _load_islamic_terms,
+        _load_islamic_laws,
+        _load_islamic_timeline,
+        _load_prophet_muhammad,
+        _load_prophet_stories,
+        _load_allah_names,
+        _load_qibla,
+        _load_quran_stats,
+        _load_road_to_salvation,
+        _load_wudu,
+    ]
+
+    for loader in generic_loaders:
+        pairs = list(loader())
+        upsert_documents(pairs, embed)
 
     print("✅ Ingestion completed.") 

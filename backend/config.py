@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     OPENAI_API_KEY: str = Field(..., env="OPENAI_API_KEY")
     PINECONE_API_KEY: str = Field(..., env="PINECONE_API_KEY")
-    PINECONE_ENV: str = Field("us-east1-gcp", env="PINECONE_ENV")
+    # PINECONE_ENV is deprecated in newer Pinecone versions
+    # PINECONE_ENV: str = Field("us-east1-gcp", env="PINECONE_ENV")
     PINECONE_INDEX_NAME: str = Field("islamic-kb", env="PINECONE_INDEX_NAME")
 
     # ------------------------------------------------------------------
@@ -32,9 +33,18 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     FASTAPI_DEBUG: bool = Field(False, env="FASTAPI_DEBUG")
 
-    class Config:
-        env_file = ".env"  # still works if user opts for local .env file
-        case_sensitive = True
+    # ------------------------------------------------------------------
+    # Pydantic v2 configuration
+    # ------------------------------------------------------------------
+    # `model_config` is the new way (v2) to tweak behaviour.  We keep the
+    # original `.env` loading and case-sensitivity, **plus** tell Pydantic
+    # to *ignore* unrelated env vars (e.g. VITE_API_URL from the frontend)
+    # instead of raising `ValidationError: extra_forbidden`.
+    model_config = {
+        "env_file": ".env",     # allow optional local .env overrides
+        "case_sensitive": True,  # preserve original behaviour
+        "extra": "ignore",      # <- crucial: ignore unknown env vars
+    }
 
 
 @lru_cache()
