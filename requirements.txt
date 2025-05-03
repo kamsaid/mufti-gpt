@@ -1,19 +1,25 @@
+# Base web framework
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
 
-# LangChain core and OpenAI bindings
-langchain==0.1.15            # framework glue
-langchain-openai==0.0.8      # updated embedding / chat classes
+# LangChain - Let pip resolve compatible versions
+langchain>=0.1.0,<0.4.0  # Broaden main langchain constraint
+langchain-openai>=0.0.8  # Keep minimum, allow updates
+langchain-pinecone       # Add the new package
 
-# OpenAI Python SDK (needed by langchain-openai 0.0.8)
-openai==1.76.2
+# OpenAI SDK (allow compatible versions)
+openai>=1.10.0,<2.0.0
 
-pinecone-client==3.1.0        # vector DB client
+# Pinecone client (allow compatible versions)
+pinecone>=6.0.0,<7.0.0
 
-# Pydantic v2 (≥2.11 ships Python-3.13 wheels)
+# Pydantic v2 (>=2.11 ships Python-3.13 wheels)
 pydantic>=2.11.4
-pydantic-settings==2.1.0      # keeps settings helper working
+pydantic-settings==2.1.0
 
+# Testing & HTTP
 pytest==8.1.1
-httpx==0.24.1
-tiktoken==0.9.0               # build with ABI3 flag for Python-3.13
+httpx>=0.25.0 # Allow newer version potentially needed by tests/deps
+
+# Tokenizer (works with ABI3 flag)
+tiktoken==0.9.0

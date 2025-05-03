@@ -9,8 +9,8 @@ import logging
 from typing import List, Tuple
 
 from pinecone import Pinecone  # type: ignore
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.vectorstores.pinecone import Pinecone as PineconeStore
+from langchain_openai import OpenAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
 
 from backend.config import get_settings
 
@@ -55,8 +55,10 @@ async def retrieve_context(query: str, k: int = 5) -> Tuple[List[str], float]:
         logger.error(f"Failed to get Pinecone index stats: {e}")
 
     # Wrap existing Pinecone index with LangChain vector store
-    vector_store = PineconeStore(
-        index, embed_model, text_key="text", namespace=None  # type: ignore[arg-type]
+    vector_store = PineconeVectorStore(
+        index_name=settings.PINECONE_INDEX_NAME,
+        embedding=embed_model,
+        text_key="text"
     )
 
     # LangChain returns list[Document] with .page_content and .metadata

@@ -1,0 +1,67 @@
+/**
+ * FORCE STYLES CSS
+ * This file contains explicit styles to ensure the application looks correct
+ * even in environments where CSS variables might not be fully supported
+ */
+
+/* Force dark theme */
+html {
+  background-color: #030711 !important;
+  color: #e1e7ef !important;
+}
+
+body {
+  background-color: #030711 !important;
+  color: #e1e7ef !important;
+}
+
+/* Force sidebar colors */
+aside {
+  background-color: #191c20 !important;
+  color: #e1e7ef !important;
+  border-color: #2e3238 !important;
+}
+
+/* Force button styles */
+button[class*="bg-primary"] {
+  background-color: #25c55d !important;
+  color: #103322 !important;
+}
+
+button[class*="border-input"] {
+  border-color: #2e3238 !important;
+}
+
+/* Force input styles */
+input {
+  background-color: transparent !important;
+  border-color: #2e3238 !important;
+  color: #e1e7ef !important;
+}
+
+/* Force card/container styles */
+div[class*="border-border"] {
+  border-color: #2e3238 !important;
+}
+
+div[class*="bg-background"] {
+  background-color: #030711 !important;
+}
+
+/* Force text colors */
+[class*="text-foreground"] {
+  color: #e1e7ef !important;
+}
+
+[class*="text-muted-foreground"] {
+  color: #8b929a !important;
+}
+
+/* Force Arabic text styling */
+.font-scheherazade {
+  font-family: 'Scheherazade New', serif !important;
+}
+
+.font-amiri {
+  font-family: 'Amiri', serif !important;
+} 
